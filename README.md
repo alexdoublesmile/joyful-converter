@@ -12,7 +12,7 @@ A professional desktop application for converting AVI video files to MP4 format 
 
 ## Requirements
 
-- Java 21 or later
+- Java 17 or later
 - Maven 3.6 or later
 
 ## Building the Application
