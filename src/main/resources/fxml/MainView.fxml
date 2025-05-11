@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
+
+<VBox fx:id="mainContainer" spacing="10" stylesheets="/styles/styles.css"
+      xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
+      fx:controller="org.joymutlu.joyfulconverter.MainController">
+
+    <padding>
+        <Insets top="20" right="20" bottom="20" left="20" />
+    </padding>
+
+    <Label text="AVI to MP4 Converter" styleClass="title-label">
+        <font>
+            <Font name="System Bold" size="24.0" />
+        </font>
+    </Label>
+
+    <Separator />
+
+    <Label text="Select input AVI file:" />
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <TextField fx:id="inputFileField" HBox.hgrow="ALWAYS" promptText="Path to AVI file" editable="false" />
+        <Button fx:id="browseInputButton" text="Browse" styleClass="browse-button" />
+    </HBox>
+
+    <Label text="Output MP4 file:" />
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <TextField fx:id="outputFileField" HBox.hgrow="ALWAYS" promptText="Path to save MP4 file" editable="false" />
+        <Button fx:id="browseOutputButton" text="Browse" styleClass="browse-button" />
+    </HBox>
+
+    <VBox spacing="5" styleClass="options-panel">
+        <Label text="Conversion Options:" styleClass="section-title" />
+        <CheckBox fx:id="preserveQualityCheckbox" text="Preserve original quality (lossless)" selected="true" />
+    </VBox>
+
+    <VBox spacing="10" VBox.vgrow="ALWAYS" alignment="BOTTOM_CENTER">
+        <Button fx:id="convertButton" text="Convert" styleClass="convert-button" />
+
+        <VBox spacing="5" alignment="CENTER">
+            <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0.0" visible="false" />
+            <Label fx:id="statusLabel" text="Select an AVI file to convert" styleClass="status-label" />
+        </VBox>
+    </VBox>
+</VBox>

@@ -1,0 +1,76 @@
+.root {
+    -fx-background-color: #f5f5f5;
+    -fx-font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.title-label {
+    -fx-text-fill: #2c3e50;
+    -fx-font-weight: bold;
+    -fx-padding: 0 0 10 0;
+}
+
+.section-title {
+    -fx-font-weight: bold;
+    -fx-font-size: 14px;
+}
+
+.browse-button {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+    -fx-min-width: 100px;
+    -fx-cursor: hand;
+}
+
+.browse-button:hover {
+    -fx-background-color: #2980b9;
+}
+
+.convert-button {
+    -fx-background-color: #2ecc71;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-min-width: 200px;
+    -fx-min-height: 40px;
+    -fx-font-size: 16px;
+    -fx-cursor: hand;
+}
+
+.convert-button:hover {
+    -fx-background-color: #27ae60;
+}
+
+.convert-button:disabled {
+    -fx-background-color: #bdc3c7;
+    -fx-opacity: 0.7;
+}
+
+.status-label {
+    -fx-text-fill: #7f8c8d;
+    -fx-font-style: italic;
+}
+
+.progress-bar {
+    -fx-pref-height: 8px;
+}
+
+.progress-bar .bar {
+    -fx-background-color: #2ecc71;
+}
+
+.options-panel {
+    -fx-background-color: #ecf0f1;
+    -fx-padding: 10;
+    -fx-background-radius: 5;
+    -fx-border-radius: 5;
+    -fx-border-color: #bdc3c7;
+    -fx-border-width: 1;
+}
+
+TextField {
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+    -fx-border-color: #bdc3c7;
+    -fx-border-width: 1;
+    -fx-padding: 5 10 5 10;
+    -fx-background-color: white;
+}
