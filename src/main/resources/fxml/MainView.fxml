@@ -14,7 +14,7 @@
         <Insets top="20" right="20" bottom="20" left="20"/>
     </padding>
 
-    <Label text="Joyful Video Converter" styleClass="title-label">
+    <Label text="Joyful Converter" styleClass="title-label">
         <font>
             <Font name="System Bold" size="28.0"/>
         </font>
@@ -45,7 +45,7 @@
         <Button fx:id="browseInputFileButton" text="File" styleClass="browse-button" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
         <Button fx:id="browseInputFolderButton" text="Folder" styleClass="browse-button" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="3"/>
 
-        <Label text="Output Location:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <Label text="Output Directory:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
         <TextField fx:id="outputDirectoryField" HBox.hgrow="ALWAYS" promptText="Select output directory" editable="false" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
         <Button fx:id="browseOutputDirectoryButton" text="Browse" styleClass="browse-button" maxWidth="Infinity" GridPane.rowIndex="1" GridPane.columnIndex="2" GridPane.columnSpan="2"/>
     </GridPane>
@@ -78,17 +78,9 @@
 
         <GridPane fx:id="progressGridPane" hgap="10" vgap="5" style="-fx-padding: 5 0 0 0;" visible="false" maxWidth="Infinity">
             <columnConstraints>
-                <ColumnConstraints halignment="RIGHT" prefWidth="150.0" minWidth="150.0" hgrow="NEVER"/>
-                <ColumnConstraints hgrow="ALWAYS" minWidth="250.0"/>
+                <ColumnConstraints hgrow="ALWAYS"/>
+                <ColumnConstraints hgrow="ALWAYS" prefWidth="150.0"/>
             </columnConstraints>
-            <rowConstraints>
-                <RowConstraints minHeight="25" prefHeight="30" />
-                <RowConstraints minHeight="25" prefHeight="30" />
-                <RowConstraints minHeight="25" prefHeight="30" />
-                <RowConstraints minHeight="25" prefHeight="30" />
-                <RowConstraints minHeight="25" prefHeight="30" />
-                <RowConstraints minHeight="25" prefHeight="30" />
-            </rowConstraints>
             <Label text="Overall Progress:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
             <ProgressBar fx:id="overallProgressBar" prefWidth="Infinity" progress="0.0" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
 

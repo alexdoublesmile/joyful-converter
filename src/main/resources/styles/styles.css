@@ -17,7 +17,6 @@
 .browse-button {
     -fx-background-color: #3498db;
     -fx-text-fill: white;
-    -fx-min-width: 100px;
     -fx-cursor: hand;
 }
 
