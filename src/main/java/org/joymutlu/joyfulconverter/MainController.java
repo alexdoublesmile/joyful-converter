@@ -1,20 +1,34 @@
 package org.joymutlu.joyfulconverter;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.ResourceBundle;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
+import javafx.collections.FXCollections;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.TextField;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import org.joymutlu.joyfulconverter.service.ConversionService;
@@ -22,232 +36,447 @@ import org.joymutlu.joyfulconverter.util.AlertUtils;
 
 public class MainController implements Initializable {
 
-    @FXML
-    private TextField inputFileField;
+    // --- FXML Elements ---
+    @FXML private VBox mainContainer;
+    @FXML private TextField inputPathField;
+    @FXML private Button browseInputFileButton;
+    @FXML private Button browseInputFolderButton;
+    @FXML private TextField outputDirectoryField;
+    @FXML private Button browseOutputDirectoryButton;
+    @FXML private ChoiceBox<String> outputFormatChoiceBox;
+    @FXML private CheckBox preserveQualityCheckbox; // Renamed in thought process, but FXML uses this ID
+    @FXML private CheckBox replaceOriginalCheckbox;
+    @FXML private Button convertButton;
 
-    @FXML
-    private TextField outputFileField;
+    // Progress UI
+    @FXML private GridPane progressGridPane;
+    @FXML private ProgressBar overallProgressBar;
+    @FXML private Label overallStatusLabel;
+    @FXML private Label currentDirectoryProgressLabel;
+    @FXML private Label currentDirectoryStatusLabel;
+    @FXML private Label currentFileProgressLabel;
+    @FXML private ProgressBar currentFileProgressBar;
+    @FXML private Label currentFileStatusLabel;
 
-    @FXML
-    private Button browseInputButton;
-
-    @FXML
-    private Button browseOutputButton;
-
-    @FXML
-    private Button convertButton;
-
-    @FXML
-    private ProgressBar progressBar;
-
-    @FXML
-    private Label statusLabel;
-
-    @FXML
-    private VBox mainContainer;
-
-    @FXML
-    private CheckBox preserveQualityCheckbox;
-
-    private final StringProperty inputFilePath = new SimpleStringProperty("");
-    private final StringProperty outputFilePath = new SimpleStringProperty("");
+    // --- Properties and Services ---
+    private final StringProperty inputPathProperty = new SimpleStringProperty("");
+    private final StringProperty outputDirectoryProperty = new SimpleStringProperty("");
     private ConversionService conversionService;
     private Task<Void> conversionTask;
 
+    private static File lastSelectedInputDirectory = null;
+    private static File lastSelectedOutputDirectory = null;
+
+    private boolean isInputFolderMode = false; // To distinguish between single file and folder mode for UI logic
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        // Initialize the conversion service
         conversionService = new ConversionService();
 
-        // Bind text fields to properties
-        inputFileField.textProperty().bindBidirectional(inputFilePath);
-        outputFileField.textProperty().bindBidirectional(outputFilePath);
+        inputPathField.textProperty().bind(inputPathProperty);
+        outputDirectoryField.textProperty().bind(outputDirectoryProperty);
 
-        // Set default value for "preserve quality" option
+        outputFormatChoiceBox.setItems(FXCollections.observableArrayList("mp4", "mkv"));
+        outputFormatChoiceBox.setValue("mp4");
+
+        // Set "Preserve original quality" to be selected by default
         preserveQualityCheckbox.setSelected(true);
+        replaceOriginalCheckbox.setSelected(false);
 
-        // Setup event handlers
         setupButtonHandlers();
+        setupInputPathListener();
 
-        // Initialize UI state
         updateUIState();
     }
 
     private void setupButtonHandlers() {
-        browseInputButton.setOnAction(event -> browseForInputFile());
-        browseOutputButton.setOnAction(event -> browseForOutputFile());
+        browseInputFileButton.setOnAction(event -> browseForInputFile());
+        browseInputFolderButton.setOnAction(event -> browseForInputFolder());
+        browseOutputDirectoryButton.setOnAction(event -> browseForOutputDirectory());
         convertButton.setOnAction(event -> startConversion());
+    }
 
-        // Update output filename when input changes
-        inputFilePath.addListener((observable, oldValue, newValue) -> {
-            if (!newValue.isEmpty()) {
-                File inputFile = new File(newValue);
-                String filename = inputFile.getName();
-
-                // Check if it's an AVI file
-                if (filename.toLowerCase().endsWith(".avi")) {
-                    // Generate MP4 output path in the same directory
-                    String outputName = filename.substring(0, filename.length() - 4) + ".mp4";
-                    outputFilePath.set(new File(inputFile.getParent(), outputName).getAbsolutePath());
+    private void setupInputPathListener() {
+        inputPathProperty.addListener((observable, oldValue, newValue) -> {
+            if (newValue != null && !newValue.isEmpty() && outputDirectoryProperty.get().isEmpty()) {
+                File input = new File(newValue);
+                if (input.exists()) {
+                    File parentDir = input.isFile() ? input.getParentFile() : input;
+                    if (parentDir != null) {
+                        String suggestedName = input.isFile() ? "ConvertedVideos" : "Converted_" + parentDir.getName();
+                        File baseDirForOutput = parentDir.getParentFile() != null ? parentDir.getParentFile() : parentDir;
+                        File suggestedOutputDir = new File(baseDirForOutput, suggestedName);
+                        outputDirectoryProperty.set(suggestedOutputDir.getAbsolutePath());
+                    }
                 }
             }
+            updateUIState();
         });
+        outputDirectoryProperty.addListener((obs, ov, nv) -> updateUIState());
     }
+
 
     private void updateUIState() {
-        boolean hasInputFile = !inputFilePath.get().isEmpty();
-        boolean hasOutputFile = !outputFilePath.get().isEmpty();
-        boolean isConverting = conversionTask != null && conversionTask.isRunning();
+        boolean hasInput = !inputPathProperty.get().isEmpty();
+        boolean hasOutput = !outputDirectoryProperty.get().isEmpty();
+        boolean isCurrentlyConverting = conversionTask != null && conversionTask.isRunning();
 
-        // Enable/disable buttons based on state
-        browseInputButton.setDisable(isConverting);
-        browseOutputButton.setDisable(isConverting || !hasInputFile);
-        convertButton.setDisable(isConverting || !hasInputFile || !hasOutputFile);
+        browseInputFileButton.setDisable(isCurrentlyConverting);
+        browseInputFolderButton.setDisable(isCurrentlyConverting);
+        browseOutputDirectoryButton.setDisable(isCurrentlyConverting);
+        convertButton.setDisable(isCurrentlyConverting || !hasInput || !hasOutput);
+        outputFormatChoiceBox.setDisable(isCurrentlyConverting);
+        preserveQualityCheckbox.setDisable(isCurrentlyConverting);
+        replaceOriginalCheckbox.setDisable(isCurrentlyConverting);
 
-        // Show/hide progress indicators
-        progressBar.setVisible(isConverting);
-        statusLabel.setVisible(true);
+        if (progressGridPane != null) {
+            progressGridPane.setVisible(isCurrentlyConverting);
+        }
 
-        if (!isConverting) {
-            if (!hasInputFile) {
-                statusLabel.setText("Select an AVI file to convert");
-            } else if (!hasOutputFile) {
-                statusLabel.setText("Specify output MP4 file location");
-            } else {
-                statusLabel.setText("Ready to convert");
+        if (!isCurrentlyConverting) {
+            resetProgressLabels();
+            if (overallStatusLabel != null) { // Ensure overallStatusLabel is not null
+                if (!hasInput) {
+                    overallStatusLabel.setText("Select an AVI file or folder to convert.");
+                } else if (!hasOutput) {
+                    overallStatusLabel.setText("Specify an output directory.");
+                } else {
+                    overallStatusLabel.setText("Ready to convert.");
+                }
+                // Ensure overallStatusLabel is visible when not converting
+                overallStatusLabel.setVisible(true);
             }
+        } else {
+            if(overallStatusLabel != null) overallStatusLabel.setVisible(true);
         }
     }
+
+    private void resetProgressLabels() {
+        if (overallProgressBar != null && !overallProgressBar.progressProperty().isBound()) {
+            overallProgressBar.setProgress(0);
+        }
+        if (currentFileProgressBar != null) {
+            currentFileProgressBar.setProgress(0);
+        }
+
+        if (overallStatusLabel != null) overallStatusLabel.setText("Ready."); // Default text when resetting
+
+        // These labels are inside progressGridPane, their visibility is tied to it
+        // or explicitly managed at the start of conversion.
+        if (currentDirectoryProgressLabel != null) currentDirectoryProgressLabel.setVisible(false);
+        if (currentDirectoryStatusLabel != null) {
+            currentDirectoryStatusLabel.setText("");
+            currentDirectoryStatusLabel.setVisible(false);
+        }
+
+        if (currentFileProgressLabel != null) currentFileProgressLabel.setVisible(false);
+        if (currentFileStatusLabel != null) {
+            currentFileStatusLabel.setText("");
+            currentFileStatusLabel.setVisible(false);
+        }
+    }
+
 
     private void browseForInputFile() {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Select AVI Video File");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("AVI Video Files", "*.avi")
-        );
-
-        // Get stage from any FXML control
-        Stage stage = (Stage) mainContainer.getScene().getWindow();
-
-        File selectedFile = fileChooser.showOpenDialog(stage);
-        if (selectedFile != null) {
-            inputFilePath.set(selectedFile.getAbsolutePath());
-            updateUIState();
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("AVI Video Files", "*.avi"));
+        if (lastSelectedInputDirectory != null && lastSelectedInputDirectory.exists()) {
+            fileChooser.setInitialDirectory(lastSelectedInputDirectory);
         }
+
+        Stage stage = (Stage) mainContainer.getScene().getWindow();
+        File selectedFile = fileChooser.showOpenDialog(stage);
+
+        if (selectedFile != null) {
+            inputPathProperty.set(selectedFile.getAbsolutePath());
+            isInputFolderMode = false; // Set mode
+            lastSelectedInputDirectory = selectedFile.getParentFile();
+            if (outputDirectoryProperty.get().isEmpty() && selectedFile.getParentFile() != null) {
+                outputDirectoryProperty.set(selectedFile.getParentFile().getAbsolutePath());
+            }
+        }
+        updateUIState();
     }
 
-    private void browseForOutputFile() {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Save MP4 Video File");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("MP4 Video Files", "*.mp4")
-        );
-
-        // Get default filename from input file
-        if (!inputFilePath.get().isEmpty()) {
-            File inputFile = new File(inputFilePath.get());
-            String defaultName = inputFile.getName().replaceAll("\\.avi$", ".mp4");
-            fileChooser.setInitialFileName(defaultName);
-            fileChooser.setInitialDirectory(inputFile.getParentFile());
+    private void browseForInputFolder() {
+        DirectoryChooser directoryChooser = new DirectoryChooser();
+        directoryChooser.setTitle("Select Input Folder with AVI Files");
+        if (lastSelectedInputDirectory != null && lastSelectedInputDirectory.exists()) {
+            directoryChooser.setInitialDirectory(lastSelectedInputDirectory);
         }
 
-        // Get stage from any FXML control
         Stage stage = (Stage) mainContainer.getScene().getWindow();
+        File selectedFolder = directoryChooser.showDialog(stage);
 
-        File selectedFile = fileChooser.showSaveDialog(stage);
-        if (selectedFile != null) {
-            outputFilePath.set(selectedFile.getAbsolutePath());
-            updateUIState();
+        if (selectedFolder != null) {
+            inputPathProperty.set(selectedFolder.getAbsolutePath());
+            isInputFolderMode = true; // Set mode
+            lastSelectedInputDirectory = selectedFolder;
+            if (outputDirectoryProperty.get().isEmpty()) {
+                File parent = selectedFolder.getParentFile();
+                if (parent == null) parent = selectedFolder;
+                outputDirectoryProperty.set(new File(parent, "Converted_" + selectedFolder.getName()).getAbsolutePath());
+            }
         }
+        updateUIState();
+    }
+
+    private void browseForOutputDirectory() {
+        DirectoryChooser directoryChooser = new DirectoryChooser();
+        directoryChooser.setTitle("Select Output Directory");
+        if (lastSelectedOutputDirectory != null && lastSelectedOutputDirectory.exists()) {
+            directoryChooser.setInitialDirectory(lastSelectedOutputDirectory);
+        } else if (lastSelectedInputDirectory != null && lastSelectedInputDirectory.exists()){
+            File suggestedParent = lastSelectedInputDirectory.isDirectory() ? lastSelectedInputDirectory : lastSelectedInputDirectory.getParentFile();
+            if (suggestedParent == null && lastSelectedInputDirectory.isFile()) suggestedParent = lastSelectedInputDirectory.getParentFile();
+            if (suggestedParent == null) suggestedParent = new File(System.getProperty("user.home"));
+            directoryChooser.setInitialDirectory(suggestedParent);
+        } else {
+            directoryChooser.setInitialDirectory(new File(System.getProperty("user.home")));
+        }
+
+
+        Stage stage = (Stage) mainContainer.getScene().getWindow();
+        File selectedFolder = directoryChooser.showDialog(stage);
+
+        if (selectedFolder != null) {
+            outputDirectoryProperty.set(selectedFolder.getAbsolutePath());
+            lastSelectedOutputDirectory = selectedFolder;
+        }
+        updateUIState();
     }
 
     private void startConversion() {
-        // Verify files
-        File inputFile = new File(inputFilePath.get());
-        File outputFile = new File(outputFilePath.get());
+        String inputPathStr = inputPathProperty.get();
+        String outputDirStr = outputDirectoryProperty.get();
+        String outputFormat = outputFormatChoiceBox.getValue();
+        boolean tryStreamCopy = preserveQualityCheckbox.isSelected(); // This now means "try to stream copy"
+        boolean shouldReplaceOriginal = replaceOriginalCheckbox.isSelected();
 
-        if (!inputFile.exists() || !inputFile.isFile()) {
-            AlertUtils.showError("Input file not found",
-                    "The selected input file does not exist or is not accessible.");
+        File inputSourceFileOrDir = new File(inputPathStr); // Renamed for clarity
+        File outputDirectory = new File(outputDirStr);
+
+        if (!inputSourceFileOrDir.exists()) {
+            AlertUtils.showError("Input Error", "Input source not found: " + inputPathStr);
             return;
         }
-
-        // Check if output file exists and confirm overwrite
-        if (outputFile.exists()) {
-            boolean confirmed = AlertUtils.showConfirmation(
-                    "File exists",
-                    "The output file already exists. Do you want to overwrite it?");
-
-            if (!confirmed) {
+        if (!outputDirectory.exists()) {
+            try {
+                Files.createDirectories(outputDirectory.toPath());
+            } catch (IOException e) {
+                AlertUtils.showError("Output Error", "Could not create output directory: " + outputDirStr + "\n" + e.getMessage());
                 return;
             }
         }
+        if (!outputDirectory.isDirectory()) {
+            AlertUtils.showError("Output Error", "Output location must be a directory.");
+            return;
+        }
 
-        // Create and start the conversion task
+        List<File> collectedFilesToConvert = new ArrayList<>();
+        if (!isInputFolderMode && inputSourceFileOrDir.isFile()) { // Use isInputFolderMode
+            if (inputSourceFileOrDir.getName().toLowerCase().endsWith(".avi")) {
+                collectedFilesToConvert.add(inputSourceFileOrDir);
+            } else {
+                AlertUtils.showError("Input Error", "Selected file is not an AVI file.");
+                return;
+            }
+        } else if (isInputFolderMode && inputSourceFileOrDir.isDirectory()) { // Use isInputFolderMode
+            try (Stream<Path> walk = Files.walk(inputSourceFileOrDir.toPath())) {
+                collectedFilesToConvert = walk.map(Path::toFile)
+                        .filter(file -> file.isFile() && file.getName().toLowerCase().endsWith(".avi"))
+                        .collect(Collectors.toList());
+            } catch (IOException e) {
+                AlertUtils.showError("Input Error", "Error reading input folder: " + e.getMessage());
+                return;
+            }
+            if (collectedFilesToConvert.isEmpty()) {
+                AlertUtils.showInformation("No Files", "No AVI files found in the selected folder and its subdirectories.");
+                return;
+            }
+        } else {
+            AlertUtils.showError("Input Error", "Invalid input source selection.");
+            return;
+        }
+
+        final List<File> filesToProcess = Collections.unmodifiableList(new ArrayList<>(collectedFilesToConvert));
+        final int totalFiles = filesToProcess.size();
+
+        AtomicInteger processedFilesCount = new AtomicInteger(0);
+        AtomicInteger successfulConversions = new AtomicInteger(0);
+        AtomicInteger failedConversions = new AtomicInteger(0);
+
+
         conversionTask = new Task<>() {
             @Override
             protected Void call() throws Exception {
-                updateMessage("Preparing to convert...");
-                updateProgress(0, 100);
+                Platform.runLater(() -> {
+                    if (progressGridPane != null) progressGridPane.setVisible(true);
+                    if (overallProgressBar != null) overallProgressBar.setVisible(true);
+                    if (overallStatusLabel != null) overallStatusLabel.setVisible(true);
 
-                // Start conversion with progress updates
-                conversionService.convertAviToMp4(
-                        inputFile.getAbsolutePath(),
-                        outputFile.getAbsolutePath(),
-                        preserveQualityCheckbox.isSelected(),
-                        (progress) -> {
-                            updateProgress(progress, 100);
-                            updateMessage(String.format("Converting: %.1f%%", progress));
+                    boolean showFolderSpecifics = totalFiles > 1 && isInputFolderMode;
+                    if(currentDirectoryProgressLabel != null) currentDirectoryProgressLabel.setVisible(showFolderSpecifics);
+                    if(currentDirectoryStatusLabel != null) currentDirectoryStatusLabel.setVisible(showFolderSpecifics);
+                    if(currentFileProgressLabel != null) currentFileProgressLabel.setVisible(true);
+                    if(currentFileProgressBar != null) currentFileProgressBar.setVisible(true);
+                    if(currentFileStatusLabel != null) currentFileStatusLabel.setVisible(true);
+
+                    overallStatusLabel.setText(String.format("Overall: Preparing... (0/%d)", totalFiles));
+                });
+
+                for (File inputFile : filesToProcess) {
+                    if (isCancelled()) {
+                        updateMessage("Conversion cancelled.");
+                        break;
+                    }
+
+                    int currentFileNum = processedFilesCount.incrementAndGet();
+                    String currentFileName = inputFile.getName();
+
+                    Path relativeInputPath;
+                    if (isInputFolderMode) {
+                        relativeInputPath = inputSourceFileOrDir.toPath().relativize(inputFile.toPath());
+                    } else {
+                        relativeInputPath = Paths.get(inputFile.getName());
+                    }
+                    String outputFileName = relativeInputPath.toString().replaceAll("(?i)\\.avi$", "." + outputFormat);
+                    Path outputPath = Paths.get(outputDirStr, outputFileName);
+
+                    Files.createDirectories(outputPath.getParent());
+
+                    String currentDirDisplay;
+                    if (!isInputFolderMode || inputFile.getParentFile().equals(inputSourceFileOrDir)) {
+                        currentDirDisplay = !isInputFolderMode ? "Selected File" : "Root Input Folder";
+                    } else {
+                        currentDirDisplay = inputSourceFileOrDir.toPath().relativize(inputFile.getParentFile().toPath()).toString();
+                    }
+
+                    final String finalCurrentDirDisplay = currentDirDisplay; // Effectively final for lambda
+                    Platform.runLater(() -> {
+                        overallStatusLabel.setText(String.format("Overall: Processing file %d of %d. Failures: %d",
+                                currentFileNum, totalFiles, failedConversions.get()));
+                        if (totalFiles > 1 && isInputFolderMode) {
+                            currentDirectoryStatusLabel.setText("In directory: " + finalCurrentDirDisplay);
+                            currentDirectoryProgressLabel.setVisible(true);
+                            currentDirectoryStatusLabel.setVisible(true);
+                        } else {
+                            if(currentDirectoryProgressLabel != null) currentDirectoryProgressLabel.setVisible(false);
+                            if(currentDirectoryStatusLabel != null) currentDirectoryStatusLabel.setVisible(false);
                         }
-                );
+                        currentFileStatusLabel.setText("Converting: " + currentFileName);
+                        currentFileProgressBar.setProgress(0);
+                        currentFileProgressLabel.setVisible(true);
+                        currentFileProgressBar.setVisible(true);
+                        currentFileStatusLabel.setVisible(true);
+                    });
+                    updateProgress(currentFileNum -1, totalFiles);
 
-                updateMessage("Conversion complete");
-                updateProgress(100, 100);
+                    try {
+                        conversionService.convertVideo(
+                                inputFile.getAbsolutePath(),
+                                outputPath.toString(),
+                                outputFormat,
+                                tryStreamCopy, // Pass the correct flag
+                                (progress) -> {
+                                    Platform.runLater(() -> {
+                                        currentFileProgressBar.setProgress(progress / 100.0);
+                                        currentFileStatusLabel.setText(String.format("Converting: %s (%.1f%%)", currentFileName, progress));
+                                    });
+                                    updateMessage(String.format("File %d/%d: %s - %.1f%%", currentFileNum, totalFiles, currentFileName, progress));
+                                }
+                        );
+
+                        Platform.runLater(() -> currentFileStatusLabel.setText("Completed: " + currentFileName));
+                        successfulConversions.incrementAndGet();
+
+                        if (shouldReplaceOriginal) {
+                            try {
+                                Files.deleteIfExists(inputFile.toPath());
+                                System.out.println("Replaced (deleted) original file: " + inputFile.getAbsolutePath());
+                            } catch (IOException e) {
+                                System.err.println("Failed to delete original file " + inputFile.getAbsolutePath() + ": " + e.getMessage());
+                                Platform.runLater(() -> AlertUtils.showWarning("Delete Failed", "Could not delete original file: " + inputFile.getName() + "\n" + e.getMessage()));
+                            }
+                        }
+                    } catch (Exception e) {
+                        failedConversions.incrementAndGet();
+                        System.err.println("Failed to convert " + currentFileName + ": " + e.getMessage());
+                        final String exceptionMessage = e.getMessage(); // Effectively final
+                        Platform.runLater(() -> {
+                            currentFileStatusLabel.setText("Failed: " + currentFileName);
+                            overallStatusLabel.setText(String.format("Overall: Processing file %d of %d. Failures: %d",
+                                    currentFileNum, totalFiles, failedConversions.get()));
+                            AlertUtils.showWarning("Conversion Failed for File", "Could not convert: " + currentFileName + "\nReason: " + exceptionMessage);
+                        });
+                    }
+                    updateProgress(currentFileNum, totalFiles);
+                }
                 return null;
             }
         };
 
-        // Handle task events
-        conversionTask.setOnSucceeded(event -> {
-            AlertUtils.showInformation(
-                    "Conversion Complete",
-                    "The video has been successfully converted to MP4 format."
-            );
-            resetConversionState();
-        });
+        conversionTask.setOnSucceeded(event -> handleConversionCompletion(totalFiles, successfulConversions.get(), failedConversions.get()));
+        conversionTask.setOnFailed(event -> handleConversionFailure(conversionTask.getException()));
+        conversionTask.setOnCancelled(event -> handleConversionCancellation());
 
-        conversionTask.setOnFailed(event -> {
-            Throwable exception = conversionTask.getException();
-            String errorMsg = exception != null ? exception.getMessage() : "Unknown error";
+        overallProgressBar.progressProperty().bind(conversionTask.progressProperty());
+        updateUIState();
 
-            AlertUtils.showError(
-                    "Conversion Failed",
-                    "Failed to convert video: " + errorMsg
-            );
-            resetConversionState();
-        });
-
-        // Bind progress
-        progressBar.progressProperty().bind(conversionTask.progressProperty());
-        statusLabel.textProperty().bind(conversionTask.messageProperty());
-
-        // Update UI state
-        convertButton.setDisable(true);
-        browseInputButton.setDisable(true);
-        browseOutputButton.setDisable(true);
-
-        // Start conversion in background thread
         Thread thread = new Thread(conversionTask);
         thread.setDaemon(true);
         thread.start();
     }
 
+    private void handleConversionCompletion(int total, int succeeded, int failed) {
+        String summary;
+        if (total == 0) { // Should not happen if we check for empty list earlier
+            summary = "No files were processed.";
+        } else if (total > 1) {
+            summary = String.format("Batch conversion complete.\nSuccessfully converted: %d\nFailed: %d\nTotal: %d",
+                    succeeded, failed, total);
+        } else { // total == 1
+            summary = succeeded == 1 ? "Video successfully converted." : "Video conversion failed.";
+        }
+
+        if (failed > 0 && succeeded == 0 && total > 0) {
+            AlertUtils.showError("Conversion Result", summary);
+        } else if (failed > 0) {
+            AlertUtils.showWarning("Conversion Result", summary);
+        } else if (total == 0) {
+            AlertUtils.showInformation("Conversion Info", summary);
+        }
+        else {
+            AlertUtils.showInformation("Conversion Complete", summary);
+        }
+        resetConversionState();
+    }
+
+    private void handleConversionFailure(Throwable exception) {
+        String errorMsg = "An unknown error occurred during the conversion process.";
+        if (exception != null) {
+            errorMsg = exception.getMessage() != null ? exception.getMessage() : exception.toString();
+            exception.printStackTrace();
+        }
+        AlertUtils.showError("Conversion Process Failed", "Error: " + errorMsg);
+        resetConversionState();
+    }
+
+    private void handleConversionCancellation() {
+        AlertUtils.showInformation("Cancelled", "Conversion process was cancelled.");
+        resetConversionState();
+    }
+
+
     private void resetConversionState() {
         Platform.runLater(() -> {
-            statusLabel.textProperty().unbind();
-            progressBar.progressProperty().unbind();
-            statusLabel.setText("Ready for next conversion");
+            if (overallProgressBar != null && overallProgressBar.progressProperty().isBound()) {
+                overallProgressBar.progressProperty().unbind();
+            }
             conversionTask = null;
+            // This will call resetProgressLabels and set text to "Ready for next conversion"
+            // and potentially hide the progressGridPane.
             updateUIState();
         });
     }

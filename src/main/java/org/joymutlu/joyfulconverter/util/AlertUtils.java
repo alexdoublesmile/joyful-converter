@@ -9,7 +9,7 @@ public class AlertUtils {
     /**
      * Shows an information alert dialog
      *
-     * @param title The title of the dialog
+     * @param title   The title of the dialog
      * @param message The message to display
      */
     public static void showInformation(String title, String message) {
@@ -23,7 +23,7 @@ public class AlertUtils {
     /**
      * Shows an error alert dialog
      *
-     * @param title The title of the dialog
+     * @param title   The title of the dialog
      * @param message The error message to display
      */
     public static void showError(String title, String message) {
@@ -35,9 +35,24 @@ public class AlertUtils {
     }
 
     /**
+     * Shows a warning alert dialog
+     *
+     * @param title   The title of the dialog
+     * @param message The warning message to display
+     */
+    public static void showWarning(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+
+    /**
      * Shows a confirmation dialog and returns the user's choice
      *
-     * @param title The title of the dialog
+     * @param title   The title of the dialog
      * @param message The message to display
      * @return true if the user confirms, false otherwise
      */

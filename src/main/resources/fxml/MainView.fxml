@@ -7,43 +7,95 @@
 
 <VBox fx:id="mainContainer" spacing="10" stylesheets="/styles/styles.css"
       xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
-      fx:controller="org.joymutlu.joyfulconverter.MainController">
+      fx:controller="org.joymutlu.joyfulconverter.MainController"
+      prefWidth="800" prefHeight="750" VBox.vgrow="ALWAYS">
 
     <padding>
-        <Insets top="20" right="20" bottom="20" left="20" />
+        <Insets top="20" right="20" bottom="20" left="20"/>
     </padding>
 
-    <Label text="AVI to MP4 Converter" styleClass="title-label">
+    <Label text="Joyful Video Converter" styleClass="title-label">
         <font>
-            <Font name="System Bold" size="24.0" />
+            <Font name="System Bold" size="28.0"/>
         </font>
+        <VBox.margin>
+            <Insets bottom="5.0" />
+        </VBox.margin>
     </Label>
 
     <Separator />
 
-    <Label text="Select input AVI file:" />
-    <HBox spacing="10" alignment="CENTER_LEFT">
-        <TextField fx:id="inputFileField" HBox.hgrow="ALWAYS" promptText="Path to AVI file" editable="false" />
-        <Button fx:id="browseInputButton" text="Browse" styleClass="browse-button" />
-    </HBox>
+    <GridPane hgap="10" vgap="8">
+        <columnConstraints>
+            <ColumnConstraints hgrow="NEVER" minWidth="10.0" prefWidth="120.0"/> <ColumnConstraints hgrow="ALWAYS" minWidth="10.0"/> <ColumnConstraints hgrow="NEVER" minWidth="10.0" prefWidth="70.0"/> <ColumnConstraints hgrow="NEVER" minWidth="10.0" prefWidth="70.0"/> </columnConstraints>
+        <rowConstraints>
+            <RowConstraints minHeight="30.0" prefHeight="35.0" vgrow="SOMETIMES"/>
+            <RowConstraints minHeight="30.0" prefHeight="35.0" vgrow="SOMETIMES"/>
+        </rowConstraints>
+        <VBox.margin>
+            <Insets top="5.0" bottom="5.0" />
+        </VBox.margin>
 
-    <Label text="Output MP4 file:" />
-    <HBox spacing="10" alignment="CENTER_LEFT">
-        <TextField fx:id="outputFileField" HBox.hgrow="ALWAYS" promptText="Path to save MP4 file" editable="false" />
-        <Button fx:id="browseOutputButton" text="Browse" styleClass="browse-button" />
-    </HBox>
+        <Label text="Input Source:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+        <TextField fx:id="inputPathField" HBox.hgrow="ALWAYS" promptText="Select AVI file or folder" editable="false" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+        <Button fx:id="browseInputFileButton" text="File" styleClass="browse-button" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
+        <Button fx:id="browseInputFolderButton" text="Folder" styleClass="browse-button" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="3"/>
 
-    <VBox spacing="5" styleClass="options-panel">
-        <Label text="Conversion Options:" styleClass="section-title" />
-        <CheckBox fx:id="preserveQualityCheckbox" text="Preserve original quality (lossless)" selected="true" />
+        <Label text="Output Location:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <TextField fx:id="outputDirectoryField" HBox.hgrow="ALWAYS" promptText="Select output directory" editable="false" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+        <Button fx:id="browseOutputDirectoryButton" text="Browse" styleClass="browse-button" maxWidth="Infinity" GridPane.rowIndex="1" GridPane.columnIndex="2" GridPane.columnSpan="2"/>
+    </GridPane>
+
+    <VBox spacing="8" styleClass="options-panel" VBox.vgrow="NEVER">
+        <padding>
+            <Insets top="10" bottom="10" left="5" right="5"/>
+        </padding>
+        <Label text="Conversion Options:" styleClass="section-title-label">
+            <font><Font name="System Bold" size="14.0" /></font>
+        </Label>
+        <HBox spacing="20" alignment="CENTER_LEFT">
+            <Label text="Output Format:"/>
+            <ChoiceBox fx:id="outputFormatChoiceBox"/>
+        </HBox>
+        <CheckBox fx:id="preserveQualityCheckbox" text="Preserve original quality (true lossless, very large files)" selected="false"/>
+        <CheckBox fx:id="replaceOriginalCheckbox" text="Replace original file(s) after conversion"/>
+        <VBox.margin>
+            <Insets bottom="10.0" />
+        </VBox.margin>
     </VBox>
 
     <VBox spacing="10" VBox.vgrow="ALWAYS" alignment="BOTTOM_CENTER">
-        <Button fx:id="convertButton" text="Convert" styleClass="convert-button" />
+        <Button fx:id="convertButton" text="Convert" styleClass="convert-button" prefHeight="40" prefWidth="150">
+            <font><Font size="16.0"/></font>
+            <VBox.margin>
+                <Insets bottom="15.0" />
+            </VBox.margin>
+        </Button>
 
-        <VBox spacing="5" alignment="CENTER">
-            <ProgressBar fx:id="progressBar" prefWidth="Infinity" progress="0.0" visible="false" />
-            <Label fx:id="statusLabel" text="Select an AVI file to convert" styleClass="status-label" />
-        </VBox>
+        <GridPane fx:id="progressGridPane" hgap="10" vgap="5" style="-fx-padding: 5 0 0 0;" visible="false">
+            <columnConstraints>
+                <ColumnConstraints halignment="RIGHT" prefWidth="150.0" hgrow="NEVER"/>
+                <ColumnConstraints hgrow="ALWAYS"/>
+            </columnConstraints>
+            <rowConstraints>
+                <RowConstraints minHeight="25" prefHeight="30" />
+                <RowConstraints minHeight="25" prefHeight="30" />
+                <RowConstraints minHeight="25" prefHeight="30" />
+                <RowConstraints minHeight="25" prefHeight="30" />
+                <RowConstraints minHeight="25" prefHeight="30" />
+                <RowConstraints minHeight="25" prefHeight="30" />
+            </rowConstraints>
+            <Label text="Overall Progress:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+            <ProgressBar fx:id="overallProgressBar" prefWidth="Infinity" progress="0.0" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+            <Label fx:id="overallStatusLabel" text="Ready" styleClass="status-label" wrapText="true" maxWidth="Infinity" GridPane.rowIndex="1" GridPane.columnIndex="0" GridPane.columnSpan="2" alignment="CENTER_LEFT"/>
+
+            <Label fx:id="currentDirectoryProgressLabel" text="Current Directory:" visible="false" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+            <Label fx:id="currentDirectoryStatusLabel" styleClass="status-label-small" wrapText="true" maxWidth="Infinity" visible="false" GridPane.rowIndex="3" GridPane.columnIndex="0" GridPane.columnSpan="2" alignment="CENTER_LEFT"/>
+
+            <Label fx:id="currentFileProgressLabel" text="Current File:" visible="false" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+            <ProgressBar fx:id="currentFileProgressBar" prefWidth="Infinity" progress="0.0" visible="false" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
+            <Label fx:id="currentFileStatusLabel" styleClass="status-label-small" wrapText="true" maxWidth="Infinity" visible="false" GridPane.rowIndex="5" GridPane.columnIndex="0" GridPane.columnSpan="2" alignment="CENTER_LEFT"/>
+        </GridPane>
     </VBox>
 </VBox>
