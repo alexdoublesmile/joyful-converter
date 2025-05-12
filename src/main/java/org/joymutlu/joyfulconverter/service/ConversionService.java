@@ -18,7 +18,7 @@ public class ConversionService {
      * @param outputPath        Path to save the output video file (e.g., .mp4, .mkv)
      * @param outputFormat      The desired output format ("mp4", "mkv")
      * @param tryStreamCopy     If true, attempts to copy the original video and audio streams without re-encoding.
-     * If false, re-encodes to H.264/AAC with high quality settings.
+     *                          If false, re-encodes to H.264/AAC with high quality settings.
      * @param progressCallback  Callback to report progress (0.0-100.0)
      * @throws Exception If conversion fails
      */
@@ -28,110 +28,181 @@ public class ConversionService {
             throw new IOException("Input file not found: " + inputPath);
         }
 
+        if (tryStreamCopy) {
+            try {
+                // First attempt: Try stream copy with user-selected format
+                streamCopyVideo(inputPath, outputPath, outputFormat, progressCallback);
+                return; // If successful, we're done
+            } catch (Exception e) {
+                String errorMessage = e.getMessage();
+
+                // Check if the error is the timebase/codec issue
+                if (errorMessage != null && (errorMessage.contains("error -22") ||
+                        errorMessage.contains("Could not open video codec") ||
+                        errorMessage.contains("timebase") && errorMessage.contains("not supported"))) {
+
+                    System.out.println("Stream copy failed with compatibility error: " + errorMessage);
+
+                    // If we already tried MKV or failed with something else, skip to re-encode
+                    if ("mkv".equalsIgnoreCase(outputFormat)) {
+                        System.out.println("MKV stream copy failed. Falling back to re-encode.");
+                    } else {
+                        // Try MKV as fallback for remuxing
+                        try {
+                            System.out.println("Trying MKV as fallback container for stream copy...");
+                            String mkvOutputPath = outputPath.substring(0, outputPath.lastIndexOf('.')) + ".mkv";
+                            streamCopyVideo(inputPath, mkvOutputPath, "mkv", progressCallback);
+                            System.out.println("MKV fallback succeeded!");
+                            return; // MKV remux succeeded, we're done
+                        } catch (Exception mkvError) {
+                            System.out.println("MKV fallback also failed: " + mkvError.getMessage());
+                            // Both attempts failed, continue to re-encode
+                        }
+                    }
+                } else {
+                    // Not a timebase/codec error, but still fail, log it
+                    System.out.println("Stream copy failed with error: " + errorMessage);
+                }
+
+                // Fall back to re-encode with original format
+                System.out.println("Falling back to full re-encode with " + outputFormat);
+            }
+        }
+
+        // If we get here, either we're not trying stream copy or all stream copy attempts failed
+        // Proceed with full re-encode
+        reEncodeVideo(inputPath, outputPath, outputFormat, progressCallback);
+    }
+
+    /**
+     * Attempts to remux (stream copy) the video without re-encoding.
+     *
+     * @param inputPath Path to input file
+     * @param outputPath Path to output file
+     * @param outputFormat Output format (mp4, mkv)
+     * @param progressCallback Progress reporting callback
+     * @throws Exception If remuxing fails
+     */
+    private void streamCopyVideo(String inputPath, String outputPath, String outputFormat, Consumer<Double> progressCallback) throws Exception {
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath)) {
             grabber.start();
 
             int sourceVideoCodec = grabber.getVideoCodec();
             int sourceAudioCodec = grabber.getAudioCodec();
-            int sourcePixelFormat = grabber.getPixelFormat();
 
+            System.out.println("Stream Copy Mode: Attempting to remux to " + outputFormat);
             System.out.println("Source Video Codec ID: " + sourceVideoCodec +
                     " (MPEG4 is " + avcodec.AV_CODEC_ID_MPEG4 + ", H264 is " + avcodec.AV_CODEC_ID_H264 + ")");
             System.out.println("Source Audio Codec ID: " + sourceAudioCodec);
-            System.out.println("Source Pixel Format: " + sourcePixelFormat +
-                    " (YUV420P is " + avutil.AV_PIX_FMT_YUV420P + ", BGR24 is " + avutil.AV_PIX_FMT_BGR24 + ")");
-
 
             try (FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(outputPath,
                     grabber.getImageWidth(), grabber.getImageHeight(), grabber.getAudioChannels())) {
 
                 recorder.setFormat(outputFormat);
-                recorder.setFrameRate(grabber.getFrameRate()); // Always set frame rate
-                // For audio, sample rate and channels are also fundamental
+                recorder.setFrameRate(grabber.getFrameRate());
                 recorder.setSampleRate(grabber.getSampleRate());
                 recorder.setAudioChannels(grabber.getAudioChannels());
 
+                // Set stream copy mode
+                recorder.setVideoCodec(sourceVideoCodec);
+                recorder.setAudioCodec(sourceAudioCodec);
 
-                if (tryStreamCopy) {
-                    System.out.println("Attempting Stream Copy Mode (Preserve Original Quality)...");
-                    // Copy original video stream
-                    recorder.setVideoCodec(sourceVideoCodec);
-                    // Copy original audio stream
-                    recorder.setAudioCodec(sourceAudioCodec);
-
-                    // When stream copying, do NOT set pixel format, CRF, preset, video quality, or audio quality,
-                    // as these are encoding parameters. The original stream characteristics are copied.
-                    // However, some metadata like bitrate might be useful if available and applicable.
-                    if (grabber.getVideoBitrate() > 0) {
-                        recorder.setVideoBitrate(grabber.getVideoBitrate());
-                    }
-                    if (grabber.getAudioBitrate() > 0) {
-                        recorder.setAudioBitrate(grabber.getAudioBitrate());
-                    }
-                    System.out.println("Stream Copy: Video Codec = " + sourceVideoCodec + ", Audio Codec = " + sourceAudioCodec);
-
-                } else {
-                    System.out.println("Re-encoding Mode (High Quality H.264/AAC)...");
-                    // --- Video Settings: Re-encode to H.264 ---
-                    recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
-                    recorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P); // Standard for H.264 compatibility
-                    recorder.setVideoOption("crf", "18"); // Visually lossless
-                    recorder.setVideoOption("preset", "slow"); // Good balance of quality and compression speed
-                    System.out.println("Re-encode Video: H.264, CRF=18, Preset=slow, PixelFormat=YUV420P");
-
-                    // --- Audio Settings: Re-encode to AAC ---
-                    recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
-                    recorder.setAudioQuality(1); // Good VBR quality (e.g., ~192-256kbps stereo for music)
-                    // For speech, lower might be fine. 0 is often highest VBR.
-                    System.out.println("Re-encode Audio: AAC, Quality=1 (Good VBR)");
+                // Copy bitrates if available
+                if (grabber.getVideoBitrate() > 0) {
+                    recorder.setVideoBitrate(grabber.getVideoBitrate());
+                }
+                if (grabber.getAudioBitrate() > 0) {
+                    recorder.setAudioBitrate(grabber.getAudioBitrate());
                 }
 
                 recorder.start();
 
-                Frame frame;
-                long totalFrames = grabber.getLengthInFrames();
-                long processedFrames = 0;
-
-                if (totalFrames <= 0) { // Estimate if not available
-                    double duration = grabber.getLengthInTime() / 1000000.0; // seconds
-                    double fps = grabber.getFrameRate();
-                    if (duration > 0 && fps > 0) {
-                        totalFrames = Math.round(duration * fps);
-                    } else {
-                        totalFrames = -1; // Indicate unknown for progress
-                    }
-                }
-
-                final long effectiveTotalFrames = totalFrames;
-
-                // In stream copy mode, we grab and record. FFmpeg handles the packet copying.
-                // In encoding mode, grabbing provides decoded frames, recording encodes them.
-                while ((frame = grabber.grab()) != null) {
-                    if (Thread.currentThread().isInterrupted()) {
-                        throw new InterruptedException("Conversion was cancelled.");
-                    }
-                    recorder.record(frame); // Records video, audio, and other frame types
-                    processedFrames++;
-
-                    if (progressCallback != null && effectiveTotalFrames > 0) {
-                        // Update progress less frequently to avoid flooding UI thread
-                        if (processedFrames % 20 == 0 || processedFrames == effectiveTotalFrames) {
-                            double progress = (processedFrames * 100.0) / effectiveTotalFrames;
-                            progressCallback.accept(Math.min(100.0, progress));
-                        }
-                    } else if (progressCallback != null && processedFrames % 100 == 0) {
-                        // For indeterminate progress, maybe a periodic ping or nothing
-                        // progressCallback.accept(-1.0); // Or some other indicator
-                    }
-                }
-
-                if (progressCallback != null) {
-                    progressCallback.accept(100.0); // Ensure 100% is sent at the end
-                }
-
-            } finally {
-                grabber.stop();
+                processFrames(grabber, recorder, progressCallback);
             }
+        }
+    }
+
+    /**
+     * Re-encodes the video with H.264/AAC high quality settings.
+     *
+     * @param inputPath Path to input file
+     * @param outputPath Path to output file
+     * @param outputFormat Output format (mp4, mkv)
+     * @param progressCallback Progress reporting callback
+     * @throws Exception If re-encoding fails
+     */
+    private void reEncodeVideo(String inputPath, String outputPath, String outputFormat, Consumer<Double> progressCallback) throws Exception {
+        try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath)) {
+            grabber.start();
+
+            System.out.println("Re-encoding Mode: Converting to H.264/AAC with format " + outputFormat);
+
+            try (FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(outputPath,
+                    grabber.getImageWidth(), grabber.getImageHeight(), grabber.getAudioChannels())) {
+
+                recorder.setFormat(outputFormat);
+                recorder.setFrameRate(grabber.getFrameRate());
+                recorder.setSampleRate(grabber.getSampleRate());
+                recorder.setAudioChannels(grabber.getAudioChannels());
+
+                // Video settings for H.264
+                recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
+                recorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P);
+                recorder.setVideoOption("crf", "18"); // Visually lossless
+                recorder.setVideoOption("preset", "slow"); // Good balance of quality and compression speed
+
+                // Audio settings for AAC
+                recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
+                recorder.setAudioQuality(1); // Good VBR quality
+
+                recorder.start();
+
+                processFrames(grabber, recorder, progressCallback);
+            }
+        }
+    }
+
+    /**
+     * Process frames from grabber to recorder with progress reporting.
+     */
+    private void processFrames(FFmpegFrameGrabber grabber, FFmpegFrameRecorder recorder, Consumer<Double> progressCallback) throws Exception {
+        Frame frame;
+        long totalFrames = grabber.getLengthInFrames();
+        long processedFrames = 0;
+
+        if (totalFrames <= 0) { // Estimate if not available
+            double duration = grabber.getLengthInTime() / 1000000.0; // seconds
+            double fps = grabber.getFrameRate();
+            if (duration > 0 && fps > 0) {
+                totalFrames = Math.round(duration * fps);
+            } else {
+                totalFrames = -1; // Indicate unknown for progress
+            }
+        }
+
+        final long effectiveTotalFrames = totalFrames;
+
+        while ((frame = grabber.grab()) != null) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Conversion was cancelled.");
+            }
+            recorder.record(frame);
+            processedFrames++;
+
+            if (progressCallback != null && effectiveTotalFrames > 0) {
+                // Update progress less frequently to avoid flooding UI thread
+                if (processedFrames % 20 == 0 || processedFrames == effectiveTotalFrames) {
+                    double progress = (processedFrames * 100.0) / effectiveTotalFrames;
+                    progressCallback.accept(Math.min(100.0, progress));
+                }
+            } else if (progressCallback != null && processedFrames % 100 == 0) {
+                // For indeterminate progress, maybe a periodic ping
+                // progressCallback.accept(-1.0);
+            }
+        }
+
+        if (progressCallback != null) {
+            progressCallback.accept(100.0); // Ensure 100% is sent at the end
         }
     }
 }

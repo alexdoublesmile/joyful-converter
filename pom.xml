@@ -6,14 +6,14 @@
 
     <groupId>org.joymutlu</groupId>
     <artifactId>joyful-converter</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.0</version>
     <name>joyful-converter</name>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>17</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
-        <javafx.version>25-ea+14</javafx.version>
+        <javafx.version>17.0.15</javafx.version>
         <javacv.version>1.5.11</javacv.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.10.2</junit.version>

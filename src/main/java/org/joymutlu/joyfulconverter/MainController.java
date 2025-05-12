@@ -341,9 +341,12 @@ public class MainController implements Initializable {
                     } else {
                         relativeInputPath = Paths.get(inputFile.getName());
                     }
+
+                    // Initially set output file with chosen format
                     String outputFileName = relativeInputPath.toString().replaceAll("(?i)\\.avi$", "." + outputFormat);
                     Path outputPath = Paths.get(outputDirStr, outputFileName);
 
+                    // Make sure parent directories exist
                     Files.createDirectories(outputPath.getParent());
 
                     String currentDirDisplay;
@@ -387,6 +390,23 @@ public class MainController implements Initializable {
                                     updateMessage(String.format("File %d/%d: %s - %.1f%%", currentFileNum, totalFiles, currentFileName, progress));
                                 }
                         );
+
+                        // Check if the output file exists with the expected format
+                        File outputFile = outputPath.toFile();
+                        if (!outputFile.exists()) {
+                            // If expected output file doesn't exist, check if MKV fallback was created
+                            if ("mp4".equalsIgnoreCase(outputFormat)) {
+                                String mkvPath = outputPath.toString().replaceAll("(?i)\\.mp4$", ".mkv");
+                                File mkvFile = new File(mkvPath);
+                                if (mkvFile.exists()) {
+                                    // MKV fallback was created
+                                    Platform.runLater(() -> {
+                                        currentFileStatusLabel.setText("Completed with format change to MKV: " + mkvFile.getName());
+                                    });
+                                    System.out.println("Fallback to MKV was used for: " + inputFile.getName());
+                                }
+                            }
+                        }
 
                         Platform.runLater(() -> currentFileStatusLabel.setText("Completed: " + currentFileName));
                         successfulConversions.incrementAndGet();
