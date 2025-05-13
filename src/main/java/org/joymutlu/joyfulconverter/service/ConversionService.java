@@ -22,7 +22,7 @@ public class ConversionService {
      * @param progressCallback  Callback to report progress (0.0-100.0)
      * @throws Exception If conversion fails
      */
-    public void convertVideo(String inputPath, String outputPath, String outputFormat, boolean tryStreamCopy, Consumer<Double> progressCallback) throws Exception {
+    public ConversionResultStatus convertVideo(String inputPath, String outputPath, String outputFormat, boolean tryStreamCopy, Consumer<Double> progressCallback) throws Exception {
         File inputFile = new File(inputPath);
         if (!inputFile.exists()) {
             throw new IOException("Input file not found: " + inputPath);
@@ -31,8 +31,7 @@ public class ConversionService {
         if (tryStreamCopy) {
             try {
                 // First attempt: Try stream copy with user-selected format
-                streamCopyVideo(inputPath, outputPath, outputFormat, progressCallback);
-                return; // If successful, we're done
+                return streamCopyVideo(inputPath, outputPath, outputFormat, progressCallback);
             } catch (Exception e) {
                 String errorMessage = e.getMessage();
 
@@ -41,27 +40,25 @@ public class ConversionService {
                         errorMessage.contains("Could not open video codec") ||
                         errorMessage.contains("timebase") && errorMessage.contains("not supported"))) {
 
-                    System.out.println("Stream copy failed with compatibility error: " + errorMessage);
+                    System.err.println("Stream copy failed with compatibility error: " + errorMessage);
 
                     // If we already tried MKV or failed with something else, skip to re-encode
                     if ("mkv".equalsIgnoreCase(outputFormat)) {
-                        System.out.println("MKV stream copy failed. Falling back to re-encode.");
+                        System.err.println("MKV stream copy failed. Falling back to re-encode.");
                     } else {
                         // Try MKV as fallback for remuxing
                         try {
                             System.out.println("Trying MKV as fallback container for stream copy...");
                             String mkvOutputPath = outputPath.substring(0, outputPath.lastIndexOf('.')) + ".mkv";
-                            streamCopyVideo(inputPath, mkvOutputPath, "mkv", progressCallback);
-                            System.out.println("MKV fallback succeeded!");
-                            return; // MKV remux succeeded, we're done
+                            return streamCopyVideo(inputPath, mkvOutputPath, "mkv", progressCallback);
                         } catch (Exception mkvError) {
-                            System.out.println("MKV fallback also failed: " + mkvError.getMessage());
+                            System.err.println("MKV fallback also failed: " + mkvError.getMessage());
                             // Both attempts failed, continue to re-encode
                         }
                     }
                 } else {
                     // Not a timebase/codec error, but still fail, log it
-                    System.out.println("Stream copy failed with error: " + errorMessage);
+                    System.err.println("Stream copy failed with error: " + errorMessage);
                 }
 
                 // Fall back to re-encode with original format
@@ -71,7 +68,7 @@ public class ConversionService {
 
         // If we get here, either we're not trying stream copy or all stream copy attempts failed
         // Proceed with full re-encode
-        reEncodeVideo(inputPath, outputPath, outputFormat, progressCallback);
+        return reEncodeVideo(inputPath, outputPath, outputFormat, progressCallback);
     }
 
     /**
@@ -83,7 +80,7 @@ public class ConversionService {
      * @param progressCallback Progress reporting callback
      * @throws Exception If remuxing fails
      */
-    private void streamCopyVideo(String inputPath, String outputPath, String outputFormat, Consumer<Double> progressCallback) throws Exception {
+    private ConversionResultStatus streamCopyVideo(String inputPath, String outputPath, String outputFormat, Consumer<Double> progressCallback) throws Exception {
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath)) {
             grabber.start();
 
@@ -120,6 +117,7 @@ public class ConversionService {
                 processFrames(grabber, recorder, progressCallback);
             }
         }
+        return ConversionResultStatus.resolveRemuxResult(outputFormat);
     }
 
     /**
@@ -131,7 +129,7 @@ public class ConversionService {
      * @param progressCallback Progress reporting callback
      * @throws Exception If re-encoding fails
      */
-    private void reEncodeVideo(String inputPath, String outputPath, String outputFormat, Consumer<Double> progressCallback) throws Exception {
+    private ConversionResultStatus reEncodeVideo(String inputPath, String outputPath, String outputFormat, Consumer<Double> progressCallback) throws Exception {
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath)) {
             grabber.start();
 
@@ -159,6 +157,11 @@ public class ConversionService {
 
                 processFrames(grabber, recorder, progressCallback);
             }
+            return ConversionResultStatus.REENCODE_OK;
+
+        } catch (Exception ex) {
+            System.err.println("All fallbacks are failed: " + ex.getMessage());
+            return ConversionResultStatus.FAILED;
         }
     }
 

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -31,6 +32,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import org.joymutlu.joyfulconverter.service.ConversionResultStatus;
 import org.joymutlu.joyfulconverter.service.ConversionService;
 import org.joymutlu.joyfulconverter.util.AlertUtils;
 
@@ -305,8 +307,12 @@ public class MainController implements Initializable {
 
         AtomicInteger processedFilesCount = new AtomicInteger(0);
         AtomicInteger successfulConversions = new AtomicInteger(0);
-        AtomicInteger failedConversions = new AtomicInteger(0);
 
+        AtomicInteger remuxMp4Count = new AtomicInteger(0);
+        AtomicInteger remuxMkvCount = new AtomicInteger(0);
+        AtomicInteger reEncodeCount = new AtomicInteger(0);
+        List<String> reEncodedFiles = new CopyOnWriteArrayList<>();
+        AtomicInteger failedConversions = new AtomicInteger(0);
 
         conversionTask = new Task<>() {
             @Override
@@ -339,29 +345,20 @@ public class MainController implements Initializable {
                     if (isInputFolderMode) {
                         relativeInputPath = inputSourceFileOrDir.toPath().relativize(inputFile.toPath());
                     } else {
-                        relativeInputPath = Paths.get(inputFile.getName());
+                        relativeInputPath = Path.of(inputFile.getName());
                     }
 
                     // Initially set output file with chosen format
                     String outputFileName = relativeInputPath.toString().replaceAll("(?i)\\.avi$", "." + outputFormat);
-                    Path outputPath = Paths.get(outputDirStr, outputFileName);
-
-                    // Make sure parent directories exist
+                    Path outputPath = Path.of(outputDirStr, outputFileName);
                     Files.createDirectories(outputPath.getParent());
 
-                    String currentDirDisplay;
-                    if (!isInputFolderMode || inputFile.getParentFile().equals(inputSourceFileOrDir)) {
-                        currentDirDisplay = !isInputFolderMode ? "Selected File" : "Root Input Folder";
-                    } else {
-                        currentDirDisplay = inputSourceFileOrDir.toPath().relativize(inputFile.getParentFile().toPath()).toString();
-                    }
-
-                    final String finalCurrentDirDisplay = currentDirDisplay; // Effectively final for lambda
+                    final String finalCurrentDirDisplay = inputFile.getParentFile().getCanonicalPath();
                     Platform.runLater(() -> {
-                        overallStatusLabel.setText(String.format("Overall: Processing file %d of %d. Failures: %d",
-                                currentFileNum, totalFiles, failedConversions.get()));
+                        overallStatusLabel.setText(String.format("Overall: Processing file %d of %d. Quality loss: %d. Failures: %d",
+                                currentFileNum, totalFiles, reEncodeCount.get(), failedConversions.get()));
                         if (totalFiles > 1 && isInputFolderMode) {
-                            currentDirectoryStatusLabel.setText("In directory: " + finalCurrentDirDisplay);
+                            currentDirectoryStatusLabel.setText(finalCurrentDirDisplay);
                             currentDirectoryProgressLabel.setVisible(true);
                             currentDirectoryStatusLabel.setVisible(true);
                         } else {
@@ -377,7 +374,7 @@ public class MainController implements Initializable {
                     updateProgress(currentFileNum -1, totalFiles);
 
                     try {
-                        conversionService.convertVideo(
+                        ConversionResultStatus status = conversionService.convertVideo(
                                 inputFile.getAbsolutePath(),
                                 outputPath.toString(),
                                 outputFormat,
@@ -409,8 +406,32 @@ public class MainController implements Initializable {
                         }
 
                         Platform.runLater(() -> currentFileStatusLabel.setText("Completed: " + currentFileName));
-                        successfulConversions.incrementAndGet();
 
+                        switch (status) {
+                            case REMUX_MP4_OK:
+                                remuxMp4Count.incrementAndGet();
+                                successfulConversions.incrementAndGet();
+                                Platform.runLater(() -> currentFileStatusLabel.setText("Completed (remuxed to MP4): " + currentFileName));
+                                break;
+                            case REMUX_MKV_OK:
+                                remuxMkvCount.incrementAndGet();
+                                successfulConversions.incrementAndGet();
+                                Platform.runLater(() -> currentFileStatusLabel.setText("Completed (remuxed to MKV): " + currentFileName));
+                                break;
+                            case REENCODE_OK:
+                                reEncodeCount.incrementAndGet();
+                                successfulConversions.incrementAndGet();
+                                reEncodedFiles.add(inputFile.getName()); // Collect names
+                                Platform.runLater(() -> currentFileStatusLabel.setText("Completed (re-encoded): " + currentFileName));
+                                break;
+                            case FAILED:
+                                // This case might be handled by the catch block below,
+                                // but good to have for explicit failures returned by convertVideo
+                                failedConversions.incrementAndGet();
+                                Platform.runLater(() -> currentFileStatusLabel.setText("Failed: " + currentFileName));
+                                break;
+//                        successfulConversions.incrementAndGet();
+                        }
                         if (shouldReplaceOriginal) {
                             try {
                                 Files.deleteIfExists(inputFile.toPath());
@@ -426,8 +447,8 @@ public class MainController implements Initializable {
                         final String exceptionMessage = e.getMessage(); // Effectively final
                         Platform.runLater(() -> {
                             currentFileStatusLabel.setText("Failed: " + currentFileName);
-                            overallStatusLabel.setText(String.format("Overall: Processing file %d of %d. Failures: %d",
-                                    currentFileNum, totalFiles, failedConversions.get()));
+                            overallStatusLabel.setText(String.format("Overall: Processing file %d of %d. Quality loss: %d. Failures: %d",
+                                    currentFileNum, totalFiles, reEncodeCount.get(), failedConversions.get()));
                             AlertUtils.showWarning("Conversion Failed for File", "Could not convert: " + currentFileName + "\nReason: " + exceptionMessage);
                         });
                     }
@@ -437,7 +458,14 @@ public class MainController implements Initializable {
             }
         };
 
-        conversionTask.setOnSucceeded(event -> handleConversionCompletion(totalFiles, successfulConversions.get(), failedConversions.get()));
+        conversionTask.setOnSucceeded(event -> handleConversionCompletion(
+                totalFiles,
+                successfulConversions.get(),
+                failedConversions.get(),
+                remuxMp4Count,
+                remuxMkvCount,
+                reEncodeCount,
+                reEncodedFiles));
         conversionTask.setOnFailed(event -> handleConversionFailure(conversionTask.getException()));
         conversionTask.setOnCancelled(event -> handleConversionCancellation());
 
@@ -449,26 +477,43 @@ public class MainController implements Initializable {
         thread.start();
     }
 
-    private void handleConversionCompletion(int total, int succeeded, int failed) {
-        String summary;
-        if (total == 0) { // Should not happen if we check for empty list earlier
-            summary = "No files were processed.";
-        } else if (total > 1) {
-            summary = String.format("Batch conversion complete.\nSuccessfully converted: %d\nFailed: %d\nTotal: %d",
-                    succeeded, failed, total);
-        } else { // total == 1
-            summary = succeeded == 1 ? "Video successfully converted." : "Video conversion failed.";
+    private void handleConversionCompletion(
+            int total,
+            int succeeded,
+            int failed,
+            AtomicInteger remuxMp4Count,
+            AtomicInteger remuxMkvCount,
+            AtomicInteger reEncodeCount,
+            List<String> reEncodedFiles) {
+        StringBuilder stats = new StringBuilder();
+        stats.append(String.format("Batch conversion complete.\nSuccessfully converted: %d\nFailed: %d\nTotal: %d\n\n",
+                succeeded, failed, total));
+        stats.append(String.format("- Remuxed to MP4 (no fallback): %d\n", remuxMp4Count.get()));
+        stats.append(String.format("- Remuxed to MKV (direct or fallback): %d\n", remuxMkvCount.get()));
+        stats.append(String.format("- Re-encoded (quality loss): %d\n", reEncodeCount.get()));
+
+        if (!reEncodedFiles.isEmpty()) {
+            stats.append("\nFiles re-encoded (potential quality loss):\n");
+            reEncodedFiles.forEach(name -> stats.append("  - ").append(name).append("\n"));
+        }
+
+        String finalSummary = stats.toString();
+
+        if (total == 0) {
+            finalSummary = "No files were processed.";
+        } else if (total == 1) {
+            finalSummary = succeeded == 1 ? "Video successfully converted." : "Video conversion failed.";
         }
 
         if (failed > 0 && succeeded == 0 && total > 0) {
-            AlertUtils.showError("Conversion Result", summary);
+            AlertUtils.showError("Conversion Result", finalSummary);
         } else if (failed > 0) {
-            AlertUtils.showWarning("Conversion Result", summary);
+            AlertUtils.showWarning("Conversion Result", finalSummary);
         } else if (total == 0) {
-            AlertUtils.showInformation("Conversion Info", summary);
+            AlertUtils.showInformation("Conversion Info", finalSummary);
         }
         else {
-            AlertUtils.showInformation("Conversion Complete", summary);
+            AlertUtils.showInformation("Conversion Complete", finalSummary);
         }
         resetConversionState();
     }

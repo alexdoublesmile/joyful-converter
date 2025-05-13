@@ -15,7 +15,7 @@ public class Main extends Application {
         try {
             Parent root = FXMLLoader.load(Objects.requireNonNull(getClass().getResource("/fxml/MainView.fxml")));
             Scene scene = new Scene(root);
-            primaryStage.setTitle("Joyful Video Converter");
+            primaryStage.setTitle("Joymutlu Tools");
             primaryStage.setScene(scene);
 
             // Set minimum size to prevent UI elements from being cut off
@@ -26,7 +26,7 @@ public class Main extends Application {
 
             // Add application icon
             try {
-                primaryStage.getIcons().add(new Image(Objects.requireNonNull(getClass().getResourceAsStream("/images/app_icon.png"))));
+                primaryStage.getIcons().add(new Image(Objects.requireNonNull(getClass().getResourceAsStream("/images/java-coffee-cup-logo.png"))));
             } catch (Exception e) {
                 System.err.println("Could not load application icon: " + e.getMessage());
             }
