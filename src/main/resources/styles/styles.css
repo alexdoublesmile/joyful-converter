@@ -24,6 +24,44 @@
     -fx-background-color: #2980b9;
 }
 
+.shuffle-button {
+    -fx-background-color: #2e9fcc;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-min-width: 200px;
+    -fx-min-height: 40px;
+    -fx-font-size: 16px;
+    -fx-cursor: hand;
+}
+
+.shuffle-button:hover {
+    -fx-background-color: #20708f;
+}
+
+.shuffle-button:disabled {
+    -fx-background-color: #bdc3c7;
+    -fx-opacity: 0.7;
+}
+
+.normalize-button {
+    -fx-background-color: #cc2e2e;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-min-width: 200px;
+    -fx-min-height: 40px;
+    -fx-font-size: 16px;
+    -fx-cursor: hand;
+}
+
+.normalize-button:hover {
+    -fx-background-color: #a82424;
+}
+
+.normalize-button:disabled {
+    -fx-background-color: #bdc3c7;
+    -fx-opacity: 0.7;
+}
+
 .convert-button {
     -fx-background-color: #2ecc71;
     -fx-text-fill: white;

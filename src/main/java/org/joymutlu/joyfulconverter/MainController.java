@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -55,9 +57,9 @@ public class MainController implements Initializable {
     @FXML private ChoiceBox<String> outputFormatChoiceBox;
     @FXML private CheckBox preserveQualityCheckbox; // Renamed in thought process, but FXML uses this ID
     @FXML private CheckBox replaceOriginalCheckbox;
-    @FXML private Button convertButton;
-    @FXML private Button renameButton;
     @FXML private Button shuffleButton;
+    @FXML private Button normalizeButton;
+    @FXML private Button convertButton;
 
     // Progress UI
     @FXML private GridPane progressGridPane;
@@ -85,6 +87,243 @@ public class MainController implements Initializable {
     private static final Pattern VIDEO_NAME_PATTERN =
             Pattern.compile("(\\d{4})\\.(\\d{2})\\. (\\d{4}) - (.+)\\.(.+)");
 
+    // Regular expression to match file name patterns
+    private static final Pattern PATTERN_1 = Pattern.compile("(\\d{4})\\.(\\d{2})\\. (\\d{4}) - (.+)\\.(.+)"); // XXXX.YY. ZZZZ - NNN.fff
+    private static final Pattern PATTERN_2 = Pattern.compile("(\\d{4}) год - (.+)\\.(.+)"); // ZZZZ год - NNN.fff
+    private static final Pattern PATTERN_3 = Pattern.compile("(?:\\[(\\d+)\\] )?(.+) \\((\\d{4})\\)\\.(.+)"); // [somenumber] NNN (ZZZZ).fff
+
+    /**
+     * Reorganizes files from a directory structure into a single directory with a standardized naming pattern.
+     * - Files matching XXXX.YYY. ZZZZ - NNN.fff are kept as is
+     * - Files matching ZZZZ год - NNN.fff are renamed to standard pattern
+     * - Files matching [somenumber] NNN (ZZZZ).fff are renamed to standard pattern
+     * - Files in subdirectories are grouped together and moved to the main directory
+     * - Each file in the root directory gets its own unique group
+     *
+     * @param directoryPath Path to the directory containing video files and subdirectories
+     * @return true if reorganization was successful, false otherwise
+     */
+    public static boolean reorganizeVideos(String directoryPath) {
+        File rootDirectory = new File(directoryPath);
+
+        // Check if directory exists and is indeed a directory
+        if (!rootDirectory.exists() || !rootDirectory.isDirectory()) {
+            System.err.println("Error: The specified path is not a valid directory: " + directoryPath);
+            return false;
+        }
+
+        // Generate a new unique group number counter
+        int groupNumberCounter = 1;
+        Map<File, String> directoryToGroupNumber = new HashMap<>();
+
+        // First collect all subdirectories to assign group numbers
+        for (File file : rootDirectory.listFiles()) {
+            if (file.isDirectory()) {
+                directoryToGroupNumber.put(file, String.format("%04d", groupNumberCounter++));
+            }
+        }
+
+        // Process files in all subdirectories first
+        try {
+            // Process subdirectories first
+            for (File file : rootDirectory.listFiles()) {
+                if (file.isDirectory()) {
+                    processDirectory(file, rootDirectory, directoryToGroupNumber);
+                }
+            }
+
+            // Then process root files individually, each getting its own group
+            List<VideoFileInfo> rootFiles = new ArrayList<>();
+            for (File file : rootDirectory.listFiles()) {
+                if (file.isFile()) {
+                    VideoFileInfo fileInfo = extractVideoInfo(file);
+                    if (fileInfo != null) {
+                        rootFiles.add(fileInfo);
+                    }
+                }
+            }
+
+            // Process each root file separately, giving it its own group
+            for (VideoFileInfo fileInfo : rootFiles) {
+                // Skip files that are already in the correct format
+                if (PATTERN_1.matcher(fileInfo.getFile().getName()).matches()) {
+                    System.out.println("Skipping already correctly named file: " + fileInfo.getFile().getName());
+                    continue;
+                }
+
+                // Create a unique group for this file
+                String groupNumber = String.format("%04d", groupNumberCounter++);
+                String unitNumber = "01"; // Always 01 since it's the only file in its group
+
+                // Create the new file name according to the standard pattern
+                String newFileName = groupNumber + "." + unitNumber + ". " +
+                        fileInfo.getYear() + " - " +
+                        fileInfo.getName() + "." +
+                        fileInfo.getFormat();
+
+                File destinationFile = new File(rootDirectory, newFileName);
+
+                // Check if destination file already exists
+                if (destinationFile.exists()) {
+                    System.err.println("Error: Cannot rename " + fileInfo.getFile().getName() +
+                            " to " + newFileName +
+                            " because destination file already exists.");
+                    continue;
+                }
+
+                // Rename the file
+                try {
+                    Files.move(fileInfo.getFile().toPath(), destinationFile.toPath(),
+                            StandardCopyOption.REPLACE_EXISTING);
+                    System.out.println("Renamed: " + fileInfo.getFile().getName() +
+                            " -> " + newFileName);
+                } catch (Exception e) {
+                    System.err.println("Error renaming file " + fileInfo.getFile().getName() +
+                            ": " + e.getMessage());
+                }
+            }
+
+            System.out.println("File reorganization completed successfully.");
+            AlertUtils.showInformation("Normalization result", "Files reorganization and renaming finished successfully");
+
+            return true;
+        } catch (Exception e) {
+            System.err.println("Error during file reorganization: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Process a directory and its files, renaming and moving files to the root directory
+     */
+    private static void processDirectory(File currentDir, File rootDir, Map<File, String> directoryToGroupNumber)
+            throws Exception {
+
+        File[] files = currentDir.listFiles();
+        if (files == null) {
+            return;
+        }
+
+        List<VideoFileInfo> videoFiles = new ArrayList<>();
+
+        // First collect all video files in this directory
+        for (File file : files) {
+            if (file.isFile()) {
+                VideoFileInfo fileInfo = extractVideoInfo(file);
+                if (fileInfo != null) {
+                    videoFiles.add(fileInfo);
+                }
+            } else if (file.isDirectory()) {
+                // Process subdirectories recursively
+                processDirectory(file, rootDir, directoryToGroupNumber);
+            }
+        }
+
+        // If no video files in this directory, return
+        if (videoFiles.isEmpty()) {
+            return;
+        }
+
+        // Reverse them for saving order
+        Collections.reverse(videoFiles);
+
+        // Get the group number for this directory
+        String groupNumber = directoryToGroupNumber.get(currentDir);
+
+        // Rename and move each file to the root directory, maintaining original order
+        // (we don't need to sort here, as we'll use the original order from the directory)
+        for (int i = 0; i < videoFiles.size(); i++) {
+            VideoFileInfo fileInfo = videoFiles.get(i);
+            String unitNumber = String.format("%02d", i + 1); // Start from 1 for each directory
+
+            // Create the new file name according to the standard pattern
+            String newFileName = groupNumber + "." + unitNumber + ". " +
+                    fileInfo.getYear() + " - " +
+                    fileInfo.getName() + "." +
+                    fileInfo.getFormat();
+
+            File destinationFile = new File(rootDir, newFileName);
+
+            // Check if destination file already exists
+            if (destinationFile.exists()) {
+                System.err.println("Error: Cannot rename " + fileInfo.getFile().getName() +
+                        " to " + newFileName +
+                        " because destination file already exists.");
+                continue;
+            }
+
+            // Move and rename the file
+            try {
+                Files.move(fileInfo.getFile().toPath(), destinationFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("Moved and renamed: " + fileInfo.getFile().getPath() +
+                        " -> " + destinationFile.getPath());
+            } catch (Exception e) {
+                System.err.println("Error moving file " + fileInfo.getFile().getPath() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Extracts video information from a file based on its name pattern
+     */
+    private static VideoFileInfo extractVideoInfo(File file) {
+        String fileName = file.getName();
+
+        // Try pattern 1: XXXX.YYY. ZZZZ - NNN.fff
+        Matcher matcher1 = PATTERN_1.matcher(fileName);
+        if (matcher1.matches()) {
+            String year = matcher1.group(3);
+            String name = matcher1.group(4);
+            String format = matcher1.group(5);
+            return new VideoFileInfo(file, year, name, format);
+        }
+
+        // Try pattern 2: ZZZZ год - NNN.fff
+        Matcher matcher2 = PATTERN_2.matcher(fileName);
+        if (matcher2.matches()) {
+            String year = matcher2.group(1);
+            String name = matcher2.group(2);
+            String format = matcher2.group(3);
+            return new VideoFileInfo(file, year, name, format);
+        }
+
+        // Try pattern 3: [somenumber] NNN (ZZZZ).fff
+        Matcher matcher3 = PATTERN_3.matcher(fileName);
+        if (matcher3.matches()) {
+            String year = matcher3.group(3);
+            String name = matcher3.group(2);
+            String format = matcher3.group(4);
+            return new VideoFileInfo(file, year, name, format);
+        }
+
+        // If no pattern matches, return null
+        System.out.println("Skipping file with non-matching pattern: " + fileName);
+        return null;
+    }
+
+    /**
+     * Helper class to store video file information
+     */
+    private static class VideoFileInfo {
+        private File file;
+        private String year;
+        private String name;
+        private String format;
+
+        public VideoFileInfo(File file, String year, String name, String format) {
+            this.file = file;
+            this.year = year;
+            this.name = name;
+            this.format = format;
+        }
+
+        public File getFile() { return file; }
+        public String getYear() { return year; }
+        public String getName() { return name; }
+        public String getFormat() { return format; }
+    }
 
     private boolean isInputFolderMode = false; // To distinguish between single file and folder mode for UI logic
 
@@ -112,11 +351,25 @@ public class MainController implements Initializable {
         browseInputFileButton.setOnAction(event -> browseForInputFile());
         browseInputFolderButton.setOnAction(event -> browseForInputFolder());
         browseOutputDirectoryButton.setOnAction(event -> browseForOutputDirectory());
-        convertButton.setOnAction(event -> startConversion());
-//        renameButton.setOnAction(event -> startRenaming());
         shuffleButton.setOnAction(event -> shuffleContent());
+        normalizeButton.setOnAction(event -> startRenaming());
+        convertButton.setOnAction(event -> startConversion());
     }
 
+    private void startRenaming() {
+        if (prepareIOPaths() == PreparationStatus.FAILED) {
+            return;
+        }
+        reorganizeVideos(inputPathProperty.get());
+    }
+
+
+    /**
+     * Renames all video files in the specified directory according to requirements:
+     * - Year, name, and format remain the same
+     * - Video unit group numbers are randomly shuffled
+     * - Unit numbers inside each group remain the same
+     * */
     private void shuffleContent() {
 
         if (prepareIOPaths() == PreparationStatus.FAILED) {
@@ -233,6 +486,8 @@ public class MainController implements Initializable {
         browseInputFileButton.setDisable(isCurrentlyConverting);
         browseInputFolderButton.setDisable(isCurrentlyConverting);
         browseOutputDirectoryButton.setDisable(isCurrentlyConverting);
+        shuffleButton.setDisable(!hasInput);
+        normalizeButton.setDisable(!hasInput);
         convertButton.setDisable(isCurrentlyConverting || !hasInput || !hasOutput);
         outputFormatChoiceBox.setDisable(isCurrentlyConverting);
         preserveQualityCheckbox.setDisable(isCurrentlyConverting);
