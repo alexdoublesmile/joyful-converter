@@ -5,13 +5,18 @@ import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.ResourceBundle;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javafx.application.Platform;
@@ -36,6 +41,8 @@ import org.joymutlu.joyfulconverter.service.ConversionResultStatus;
 import org.joymutlu.joyfulconverter.service.ConversionService;
 import org.joymutlu.joyfulconverter.util.AlertUtils;
 
+import static java.util.stream.Collectors.toList;
+
 public class MainController implements Initializable {
 
     // --- FXML Elements ---
@@ -49,6 +56,8 @@ public class MainController implements Initializable {
     @FXML private CheckBox preserveQualityCheckbox; // Renamed in thought process, but FXML uses this ID
     @FXML private CheckBox replaceOriginalCheckbox;
     @FXML private Button convertButton;
+    @FXML private Button renameButton;
+    @FXML private Button shuffleButton;
 
     // Progress UI
     @FXML private GridPane progressGridPane;
@@ -68,6 +77,14 @@ public class MainController implements Initializable {
 
     private static File lastSelectedInputDirectory = null;
     private static File lastSelectedOutputDirectory = null;
+
+    private File inputSourceFileOrDir;
+    private File outputDirectory;
+
+    // Regular expression to match file name pattern: XXXX.YY. ZZZZ - NNN.fff
+    private static final Pattern VIDEO_NAME_PATTERN =
+            Pattern.compile("(\\d{4})\\.(\\d{2})\\. (\\d{4}) - (.+)\\.(.+)");
+
 
     private boolean isInputFolderMode = false; // To distinguish between single file and folder mode for UI logic
 
@@ -96,6 +113,96 @@ public class MainController implements Initializable {
         browseInputFolderButton.setOnAction(event -> browseForInputFolder());
         browseOutputDirectoryButton.setOnAction(event -> browseForOutputDirectory());
         convertButton.setOnAction(event -> startConversion());
+//        renameButton.setOnAction(event -> startRenaming());
+        shuffleButton.setOnAction(event -> shuffleContent());
+    }
+
+    private void shuffleContent() {
+
+        if (prepareIOPaths() == PreparationStatus.FAILED) {
+            return;
+        }
+        if (!isInputFolderMode || inputSourceFileOrDir.isFile()) {
+                AlertUtils.showError("Input Error", "Choose folder for shuffling.");
+                return;
+        }
+        WalkResult walkResult = walkInputDirectory();
+        if (walkResult.isFailure()) {
+            AlertUtils.showError(walkResult.info().title(), walkResult.info().message());
+            return;
+        }
+        if (walkResult.status() == WalkResultStatus.INFO) {
+            AlertUtils.showInformation(walkResult.info().title(), walkResult.info().message());
+        }
+        final List<File> filesToProcess = List.copyOf(walkResult.filesForProcess());
+
+        List<String> groupNumbers = new ArrayList<>();
+        Map<String, List<File>> groupToFiles = new HashMap<>();
+
+        for (File file : filesToProcess) {
+            if (file.isFile()) {
+                String fileName = file.getName();
+                Matcher matcher = VIDEO_NAME_PATTERN.matcher(fileName);
+
+                if (matcher.matches()) {
+                    String groupNumber = matcher.group(1);
+
+                    if (!groupToFiles.containsKey(groupNumber)) {
+                        groupNumbers.add(groupNumber);
+                        groupToFiles.put(groupNumber, new ArrayList<>());
+                    }
+
+                    groupToFiles.get(groupNumber).add(file);
+                } else {
+                    System.out.println("Skipping file with non-matching pattern: " + fileName);
+                }
+            }
+        }
+        if (groupNumbers.isEmpty()) {
+            System.out.println("No files with the required pattern found in the directory.");
+            return;
+        }
+        List<String> shuffledGroupNumbers = new ArrayList<>(groupNumbers);
+        long seed = System.currentTimeMillis();
+        Collections.shuffle(shuffledGroupNumbers, new Random(seed));
+
+        Map<String, String> groupMapping = new HashMap<>();
+        for (int i = 0; i < groupNumbers.size(); i++) {
+            groupMapping.put(groupNumbers.get(i), shuffledGroupNumbers.get(i));
+        }
+
+        // Rename files
+        for (String originalGroup : groupNumbers) {
+            String newGroup = groupMapping.get(originalGroup);
+
+            for (File file : groupToFiles.get(originalGroup)) {
+                String fileName = file.getName();
+                Matcher matcher = VIDEO_NAME_PATTERN.matcher(fileName);
+
+                if (matcher.matches()) {
+                    String unitNumber = matcher.group(2);
+                    String year = matcher.group(3);
+                    String name = matcher.group(4);
+                    String format = matcher.group(5);
+
+                    String newFileName = newGroup + "." + unitNumber + ". " + year + " - " + name + "." + format;
+                    File newFile = new File(inputSourceFileOrDir, newFileName);
+
+                    // Check if destination file already exists (unlikely with proper shuffling but a good precaution)
+                    if (newFile.exists()) {
+                        System.out.println("Warning: Will not be renamed " + fileName + " to " + newFileName + " because destination is the same.");
+                        continue;
+                    }
+
+                    if (!file.renameTo(newFile)) {
+                        System.err.println("Error: Failed to rename " + fileName + " to " + newFileName);
+                    } else {
+                        System.out.println("Renamed: " + fileName + " -> " + newFileName);
+                    }
+                }
+            }
+        }
+        AlertUtils.showInformation("Shuffle result", "Shuffling finished successfully");
     }
 
     private void setupInputPathListener() {
@@ -250,59 +357,38 @@ public class MainController implements Initializable {
     }
 
     private void startConversion() {
-        String inputPathStr = inputPathProperty.get();
-        String outputDirStr = outputDirectoryProperty.get();
-        String outputFormat = outputFormatChoiceBox.getValue();
         boolean tryStreamCopy = preserveQualityCheckbox.isSelected(); // This now means "try to stream copy"
         boolean shouldReplaceOriginal = replaceOriginalCheckbox.isSelected();
-
-        File inputSourceFileOrDir = new File(inputPathStr); // Renamed for clarity
-        File outputDirectory = new File(outputDirStr);
-
-        if (!inputSourceFileOrDir.exists()) {
-            AlertUtils.showError("Input Error", "Input source not found: " + inputPathStr);
-            return;
-        }
-        if (!outputDirectory.exists()) {
-            try {
-                Files.createDirectories(outputDirectory.toPath());
-            } catch (IOException e) {
-                AlertUtils.showError("Output Error", "Could not create output directory: " + outputDirStr + "\n" + e.getMessage());
-                return;
-            }
-        }
-        if (!outputDirectory.isDirectory()) {
-            AlertUtils.showError("Output Error", "Output location must be a directory.");
+        String outputFormat = outputFormatChoiceBox.getValue();
+        if (prepareIOPaths() == PreparationStatus.FAILED) {
             return;
         }
 
-        List<File> collectedFilesToConvert = new ArrayList<>();
-        if (!isInputFolderMode && inputSourceFileOrDir.isFile()) { // Use isInputFolderMode
+        List<File> filesForProcess = new ArrayList<>();
+        if (!isInputFolderMode && inputSourceFileOrDir.isFile()) {
             if (inputSourceFileOrDir.getName().toLowerCase().endsWith(".avi")) {
-                collectedFilesToConvert.add(inputSourceFileOrDir);
+                filesForProcess.add(inputSourceFileOrDir);
             } else {
                 AlertUtils.showError("Input Error", "Selected file is not an AVI file.");
                 return;
             }
-        } else if (isInputFolderMode && inputSourceFileOrDir.isDirectory()) { // Use isInputFolderMode
-            try (Stream<Path> walk = Files.walk(inputSourceFileOrDir.toPath())) {
-                collectedFilesToConvert = walk.map(Path::toFile)
-                        .filter(file -> file.isFile() && file.getName().toLowerCase().endsWith(".avi"))
-                        .collect(Collectors.toList());
-            } catch (IOException e) {
-                AlertUtils.showError("Input Error", "Error reading input folder: " + e.getMessage());
+        } else if (isInputFolderMode && inputSourceFileOrDir.isDirectory()) {
+            WalkResult walkResult = walkInputDirectory(file -> file.isFile() && file.getName().toLowerCase().endsWith(".avi"));
+            if (walkResult.isFailure()) {
+                AlertUtils.showError(walkResult.info().title(), walkResult.info().message());
                 return;
             }
-            if (collectedFilesToConvert.isEmpty()) {
-                AlertUtils.showInformation("No Files", "No AVI files found in the selected folder and its subdirectories.");
-                return;
+            if (walkResult.status() == WalkResultStatus.INFO) {
+                AlertUtils.showInformation(walkResult.info().title(), walkResult.info().message());
             }
+            filesForProcess = walkResult.filesForProcess();
+
         } else {
             AlertUtils.showError("Input Error", "Invalid input source selection.");
             return;
         }
 
-        final List<File> filesToProcess = Collections.unmodifiableList(new ArrayList<>(collectedFilesToConvert));
+        final List<File> filesToProcess = List.copyOf(filesForProcess);
         final int totalFiles = filesToProcess.size();
 
         AtomicInteger processedFilesCount = new AtomicInteger(0);
@@ -350,7 +436,7 @@ public class MainController implements Initializable {
 
                     // Initially set output file with chosen format
                     String outputFileName = relativeInputPath.toString().replaceAll("(?i)\\.avi$", "." + outputFormat);
-                    Path outputPath = Path.of(outputDirStr, outputFileName);
+                    Path outputPath = Path.of(outputDirectoryProperty.get(), outputFileName);
                     Files.createDirectories(outputPath.getParent());
 
                     final String finalCurrentDirDisplay = inputFile.getParentFile().getCanonicalPath();
@@ -475,6 +561,51 @@ public class MainController implements Initializable {
         Thread thread = new Thread(conversionTask);
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private WalkResult walkInputDirectory() {
+        return walkInputDirectory(file -> true);
+    }
+
+    private WalkResult walkInputDirectory(Predicate<File> filter) {
+        List<File> result;
+        try (Stream<Path> walk = Files.walk(inputSourceFileOrDir.toPath())) {
+            result = walk.map(Path::toFile)
+                    .filter(filter)
+                    .collect(toList());
+        } catch (IOException e) {
+            return WalkResult.ofFailure("Input Error", "Error reading input folder: " + e.getMessage());
+        }
+        if (result.isEmpty()) {
+            return WalkResult.ofInfo("No Files", "No files for process found in the selected folder and its subdirectories.");
+        }
+        return WalkResult.ofSuccess(result);
+    }
+
+    private PreparationStatus prepareIOPaths() {
+        String inputPathStr = inputPathProperty.get();
+        String outputDirStr = outputDirectoryProperty.get();
+
+        inputSourceFileOrDir = new File(inputPathStr); // Renamed for clarity
+        outputDirectory = new File(outputDirStr);
+
+        if (!inputSourceFileOrDir.exists()) {
+            AlertUtils.showError("Input Error", "Input source not found: " + inputPathStr);
+            return PreparationStatus.FAILED;
+        }
+        if (!outputDirectory.exists()) {
+            try {
+                Files.createDirectories(outputDirectory.toPath());
+            } catch (IOException e) {
+                AlertUtils.showError("Output Error", "Could not create output directory: " + outputDirStr + "\n" + e.getMessage());
+                return PreparationStatus.FAILED;
+            }
+        }
+        if (!outputDirectory.isDirectory()) {
+            AlertUtils.showError("Output Error", "Output location must be a directory.");
+            return PreparationStatus.FAILED;
+        }
+        return PreparationStatus.SUCCESSFUL;
     }
 
     private void handleConversionCompletion(

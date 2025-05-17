@@ -75,6 +75,18 @@
                 <Insets bottom="15.0" />
             </VBox.margin>
         </Button>
+        <Button fx:id="renameButton" text="Rename" styleClass="convert-button" prefHeight="40" prefWidth="150">
+            <font><Font size="16.0"/></font>
+            <VBox.margin>
+                <Insets bottom="15.0" />
+            </VBox.margin>
+        </Button>
+        <Button fx:id="shuffleButton" text="Shuffle" styleClass="convert-button" prefHeight="40" prefWidth="150">
+            <font><Font size="16.0"/></font>
+            <VBox.margin>
+                <Insets bottom="15.0" />
+            </VBox.margin>
+        </Button>
 
         <GridPane fx:id="progressGridPane" hgap="10" vgap="5" style="-fx-padding: 5 0 0 0;" visible="false" maxWidth="Infinity">
             <columnConstraints>
