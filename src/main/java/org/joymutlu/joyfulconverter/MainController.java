@@ -91,6 +91,8 @@ public class MainController implements Initializable {
     private static final Pattern PATTERN_1 = Pattern.compile("(\\d{4})\\.(\\d{2})\\. (\\d{4}) - (.+)\\.(.+)"); // XXXX.YY. ZZZZ - NNN.fff
     private static final Pattern PATTERN_2 = Pattern.compile("(\\d{4}) год - (.+)\\.(.+)"); // ZZZZ год - NNN.fff
     private static final Pattern PATTERN_3 = Pattern.compile("(?:\\[(\\d+)\\] )?(.+) \\((\\d{4})\\)\\.(.+)"); // [somenumber] NNN (ZZZZ).fff
+    private static final Pattern PATTERN_4 = Pattern.compile("(\\d+) - (.+)\\.(.+)"); // ZZZZ - NNN.fff
+    private static final Pattern DIRECTORY_PATTERN = Pattern.compile("(.+) год - (.+)"); // ZZZZ+ год - NNN
 
     /**
      * Reorganizes files from a directory structure into a single directory with a standardized naming pattern.
@@ -136,7 +138,7 @@ public class MainController implements Initializable {
             List<VideoFileInfo> rootFiles = new ArrayList<>();
             for (File file : rootDirectory.listFiles()) {
                 if (file.isFile()) {
-                    VideoFileInfo fileInfo = extractVideoInfo(file);
+                    VideoFileInfo fileInfo = extractVideoInfo(file, null);
                     if (fileInfo != null) {
                         rootFiles.add(fileInfo);
                     }
@@ -210,7 +212,7 @@ public class MainController implements Initializable {
         // First collect all video files in this directory
         for (File file : files) {
             if (file.isFile()) {
-                VideoFileInfo fileInfo = extractVideoInfo(file);
+                VideoFileInfo fileInfo = extractVideoInfo(file, currentDir);
                 if (fileInfo != null) {
                     videoFiles.add(fileInfo);
                 }
@@ -226,7 +228,7 @@ public class MainController implements Initializable {
         }
 
         // Reverse them for saving order
-        Collections.reverse(videoFiles);
+//        Collections.reverse(videoFiles);
 
         // Get the group number for this directory
         String groupNumber = directoryToGroupNumber.get(currentDir);
@@ -268,8 +270,17 @@ public class MainController implements Initializable {
     /**
      * Extracts video information from a file based on its name pattern
      */
-    private static VideoFileInfo extractVideoInfo(File file) {
+    private static VideoFileInfo extractVideoInfo(File file, File serialDir) {
         String fileName = file.getName();
+        String fileSerialName = "";
+        String directoryYear = "";
+        if (serialDir != null) {
+            final Matcher matcher = DIRECTORY_PATTERN.matcher(serialDir.getName());
+            if (matcher.matches()) {
+                directoryYear = matcher.group(1);
+                fileSerialName = matcher.group(2) + ". ";
+            }
+        }
 
         // Try pattern 1: XXXX.YYY. ZZZZ - NNN.fff
         Matcher matcher1 = PATTERN_1.matcher(fileName);
@@ -277,7 +288,7 @@ public class MainController implements Initializable {
             String year = matcher1.group(3);
             String name = matcher1.group(4);
             String format = matcher1.group(5);
-            return new VideoFileInfo(file, year, name, format);
+            return new VideoFileInfo(file, year, fileSerialName + name, format);
         }
 
         // Try pattern 2: ZZZZ год - NNN.fff
@@ -286,7 +297,7 @@ public class MainController implements Initializable {
             String year = matcher2.group(1);
             String name = matcher2.group(2);
             String format = matcher2.group(3);
-            return new VideoFileInfo(file, year, name, format);
+            return new VideoFileInfo(file, year, fileSerialName + name, format);
         }
 
         // Try pattern 3: [somenumber] NNN (ZZZZ).fff
@@ -295,7 +306,16 @@ public class MainController implements Initializable {
             String year = matcher3.group(3);
             String name = matcher3.group(2);
             String format = matcher3.group(4);
-            return new VideoFileInfo(file, year, name, format);
+            return new VideoFileInfo(file, year, fileSerialName + name, format);
+        }
+
+        // Try pattern 4: ZZZ - NNN.fff
+        Matcher matcher4 = PATTERN_4.matcher(fileName);
+        if (matcher4.matches()) {
+            String year = directoryYear;
+            String name = matcher4.group(2);
+            String format = matcher4.group(3);
+            return new VideoFileInfo(file, year, fileSerialName + name, format);
         }
 
         // If no pattern matches, return null
